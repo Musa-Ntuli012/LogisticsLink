@@ -125,6 +125,17 @@ Data persists across browser sessions and is automatically saved when you make c
 - Multi-user collaboration
 - Custom report builder
 
+## 🔒 Security
+
+**Status**: ✅ **SECURE** - No known vulnerabilities
+
+- ✅ Latest React version (19.2.1+) installed
+- ✅ Regular security audits pass (`npm audit`)
+- ✅ Not affected by CVE-2025-55182 (React2Shell) - This is a client-side Vite app, not Next.js
+- ✅ Security headers configured in Vercel deployment
+
+See [SECURITY_ADVISORY.md](./SECURITY_ADVISORY.md) for detailed security information.
+
 ## 🚀 Deployment
 
 ### Vercel Deployment (Recommended)
