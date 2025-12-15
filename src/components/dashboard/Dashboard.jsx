@@ -4,19 +4,33 @@ import StatCard from './StatCard'
 import CongestionMeter from './CongestionMeter'
 import AlertFeed from './AlertFeed'
 import { PortTrendChart, SupplierPerformanceChart, RouteReliabilityChart } from './AnalyticsChart'
-import { samplePorts, sampleContainers, getOverallCongestionScore } from '../../utils/portSimulator'
-import { sampleRoutes } from '../../utils/routeCalculator'
-import { loadContainers, loadSuppliers } from '../../utils/localStorage'
-import { sampleSuppliers } from '../../utils/supplierData'
+import { samplePorts, getOverallCongestionScore } from '../../utils/portSimulator'
+import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/AuthContext.jsx'
 
 function Dashboard() {
-  const [containers, setContainers] = useState(sampleContainers)
-  const [suppliers] = useState(() => loadSuppliers(sampleSuppliers))
-  
+  const { company } = useAuth()
+  const [containers, setContainers] = useState([])
+  const [suppliers, setSuppliers] = useState([])
+  const [routes, setRoutes] = useState([])
+
   useEffect(() => {
-    const savedContainers = loadContainers(sampleContainers)
-    setContainers(savedContainers)
-  }, [])
+    if (!company?.id) return
+
+    async function load() {
+      const [{ data: containerRows }, { data: supplierRows }, { data: routeRows }] = await Promise.all([
+        supabase.from('containers').select('*').eq('company_id', company.id),
+        supabase.from('suppliers').select('*').eq('company_id', company.id),
+        supabase.from('routes').select('*').eq('company_id', company.id),
+      ])
+
+      setContainers(containerRows ?? [])
+      setSuppliers(supplierRows ?? [])
+      setRoutes(routeRows ?? [])
+    }
+
+    load()
+  }, [company])
 
   const congestionScore = useMemo(() => getOverallCongestionScore(samplePorts), [])
 
@@ -30,21 +44,26 @@ function Dashboard() {
   )
 
   const onTimeRate = useMemo(() => {
-    const total = sampleRoutes.length
-    if (!total) return 0
-    const good = sampleRoutes.filter((r) => r.reliability >= 80).length
-    return Math.round((good / total) * 100)
-  }, [])
+    if (!routes.length) return 0
+    // Simple heuristic: percentage of routes where road mode reliability >= 80
+    const flatRoutes = routes.filter((r) => Array.isArray(r.modes) && r.modes.length > 0)
+    if (!flatRoutes.length) return 0
+    const good = flatRoutes.filter((r) => {
+      const road = r.modes.find((m) => m.type === 'road')
+      return road && road.reliability >= 80
+    }).length
+    return Math.round((good / flatRoutes.length) * 100)
+  }, [routes])
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl md:text-2xl font-semibold tracking-tight">
-            SA Supply Chain Command Center
+            SA Logistics Command Center
           </h1>
           <p className="text-xs md:text-sm text-muted mt-1">
-            Live overview of port congestion, shipments and route reliability across South Africa.
+            Live overview of shipments, port/yard congestion and route reliability across South Africa.
           </p>
         </div>
         <div className="badge border border-emerald-500/40 bg-emerald-500/10 text-emerald-400">
@@ -129,7 +148,7 @@ function Dashboard() {
           <TrendingUp className="h-4 w-4 text-primary" />
           <h2 className="text-sm font-semibold tracking-tight">Route Reliability Comparison</h2>
         </div>
-        <RouteReliabilityChart routes={sampleRoutes} />
+        <RouteReliabilityChart routes={routes} />
       </div>
     </div>
   )

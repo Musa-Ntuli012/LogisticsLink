@@ -1,42 +1,152 @@
 import { useState, useEffect } from 'react'
 import { Plus, Star, Mail, Phone, Package, TrendingUp, AlertCircle, X, Download } from 'lucide-react'
-import { sampleSuppliers, sampleOrders, getStatusColor, getRatingStars } from '../../utils/supplierData'
-import { loadSuppliers, saveSuppliers, loadOrders, saveOrders } from '../../utils/localStorage'
+import { getStatusColor, getRatingStars } from '../../utils/supplierData'
 import { exportSuppliers, exportOrders } from '../../utils/csvExport'
 import toast from 'react-hot-toast'
+import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/AuthContext.jsx'
 
 function SuppliersView() {
-  const [suppliers, setSuppliers] = useState(sampleSuppliers)
-  const [orders, setOrders] = useState(sampleOrders)
+  const { company, role, licenceExpired } = useAuth()
+  const canWrite = !licenceExpired && role !== 'viewer'
+  const [suppliers, setSuppliers] = useState([])
+  const [orders, setOrders] = useState([])
   const [showAddForm, setShowAddForm] = useState(false)
   const [selectedSupplier, setSelectedSupplier] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
-    const savedSuppliers = loadSuppliers(sampleSuppliers)
-    const savedOrders = loadOrders(sampleOrders)
-    setSuppliers(savedSuppliers)
-    setOrders(savedOrders)
-  }, [])
+    if (!company?.id) return
 
-  const handleSaveSupplier = (supplierData) => {
-    const newSupplier = {
-      ...supplierData,
-      supplierId: supplierData.supplierId || `SUP-${Date.now()}`,
-      rating: supplierData.rating || 0,
-      metrics: supplierData.metrics || {
-        onTimeDeliveryRate: 0,
-        orderAccuracy: 0,
-        responseTime: 0,
-        qualityScore: 0,
-      },
-      orders: supplierData.orders || [],
+    async function load() {
+      // Load suppliers
+      const { data: supplierRows, error: suppliersError } = await supabase
+        .from('suppliers')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+
+      if (suppliersError) {
+        // eslint-disable-next-line no-console
+        console.error('Error loading suppliers from Supabase:', suppliersError)
+        toast.error('Failed to load suppliers')
+        setSuppliers([])
+      } else {
+        setSuppliers(
+          (supplierRows ?? []).map((s) => ({
+            id: s.id,
+            supplierId: s.supplier_id,
+            name: s.name,
+            category: s.category,
+            location: s.location,
+            contactPerson: s.contact_person,
+            email: s.email,
+            phone: s.phone,
+            rating: s.rating ?? 0,
+            metrics: s.metrics || {
+              onTimeDeliveryRate: 0,
+              orderAccuracy: 0,
+              responseTime: 0,
+              qualityScore: 0,
+            },
+            orders: s.orders || [],
+            notes: s.notes || '',
+          })),
+        )
+      }
+
+      // Load orders
+      const { data: orderRows, error: ordersError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+
+      if (ordersError) {
+        // eslint-disable-next-line no-console
+        console.error('Error loading orders from Supabase:', ordersError)
+        toast.error('Failed to load orders')
+        setOrders([])
+      } else {
+        setOrders(
+          (orderRows ?? []).map((o) => ({
+            id: o.id,
+            orderId: o.order_id,
+            supplierId: o.supplier_id,
+            supplierName: o.supplier_name,
+            product: o.product,
+            quantity: o.quantity,
+            orderDate: o.order_date,
+            expectedDelivery: o.expected_delivery,
+            status: o.status,
+            value: o.value,
+          })),
+        )
+      }
     }
-    const updatedSuppliers = [...suppliers, newSupplier]
-    setSuppliers(updatedSuppliers)
-    saveSuppliers(updatedSuppliers)
-    toast.success('Supplier added successfully!')
-    setShowAddForm(false)
+
+    load()
+  }, [company])
+
+  const handleSaveSupplier = async (supplierData) => {
+    try {
+      const toInsert = {
+        company_id: company?.id ?? null,
+        supplier_id: supplierData.supplierId || `SUP-${Date.now()}`,
+        name: supplierData.name,
+        category: supplierData.category,
+        location: supplierData.location,
+        contact_person: supplierData.contactPerson,
+        email: supplierData.email,
+        phone: supplierData.phone,
+        rating: supplierData.rating || 0,
+        metrics:
+          supplierData.metrics || {
+            onTimeDeliveryRate: 0,
+            orderAccuracy: 0,
+            responseTime: 0,
+            qualityScore: 0,
+          },
+        orders: supplierData.orders || [],
+        notes: supplierData.notes || '',
+      }
+
+      const { data, error } = await supabase
+        .from('suppliers')
+        .insert(toInsert)
+        .select()
+
+      if (error) throw error
+
+      const created = data?.[0]
+      const newSupplier = {
+        id: created.id,
+        supplierId: created.supplier_id,
+        name: created.name,
+        category: created.category,
+        location: created.location,
+        contactPerson: created.contact_person,
+        email: created.email,
+        phone: created.phone,
+        rating: created.rating ?? 0,
+        metrics: created.metrics || {
+          onTimeDeliveryRate: 0,
+          orderAccuracy: 0,
+          responseTime: 0,
+          qualityScore: 0,
+        },
+        orders: created.orders || [],
+        notes: created.notes || '',
+      }
+
+      setSuppliers((prev) => [newSupplier, ...prev])
+      toast.success('Supplier added successfully!')
+      setShowAddForm(false)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error saving supplier:', error)
+      toast.error('Failed to add supplier')
+    }
   }
 
   const filteredSuppliers = suppliers.filter((supplier) =>
@@ -58,7 +168,18 @@ function SuppliersView() {
             <button
               onClick={() => {
                 try {
-                  exportSuppliers(suppliers)
+                  const exportData = suppliers.map((s) => ({
+                    supplierId: s.supplierId,
+                    name: s.name,
+                    category: s.category,
+                    location: s.location,
+                    contactPerson: s.contactPerson,
+                    email: s.email,
+                    phone: s.phone,
+                    rating: s.rating,
+                    metrics: s.metrics,
+                  }))
+                  exportSuppliers(exportData)
                   toast.success('Suppliers exported to CSV')
                 } catch (error) {
                   toast.error('Failed to export suppliers')
@@ -70,7 +191,11 @@ function SuppliersView() {
               Export
             </button>
           )}
-          <button onClick={() => setShowAddForm(true)} className="btn-primary flex items-center gap-2">
+          <button
+            onClick={() => canWrite && setShowAddForm(true)}
+            disabled={!canWrite}
+            className="btn-primary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
             <Plus className="h-4 w-4" />
             Add Supplier
           </button>
@@ -92,7 +217,7 @@ function SuppliersView() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredSuppliers.map((supplier) => (
           <SupplierCard
-            key={supplier.supplierId}
+            key={supplier.id ?? supplier.supplierId}
             supplier={supplier}
             onClick={() => setSelectedSupplier(supplier)}
           />
@@ -148,7 +273,7 @@ function SuppliersView() {
             </div>
           ) : (
             orders.map((order) => (
-              <OrderCard key={order.orderId} order={order} />
+              <OrderCard key={order.id ?? order.orderId} order={order} />
             ))
           )}
         </div>

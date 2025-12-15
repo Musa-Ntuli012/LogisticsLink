@@ -1,25 +1,25 @@
-# LogisticsLink - Supply Chain Transparency Platform
+# LogisticsLink - SA Truck Logistics Command Platform
 
-Navigate South Africa's Logistics Crisis with Intelligence
+Navigate South Africa's Trucking & Logistics Crisis with Intelligence
 
 ## 🚀 Overview
 
-LogisticsLink is a comprehensive supply chain visibility platform designed specifically for South African businesses navigating infrastructure challenges. The app provides real-time port congestion tracking, freight route optimization, supplier management, and analytics - all with a premium, data-rich UI.
+LogisticsLink is a truck-focused logistics visibility platform designed specifically for South African fleets and shippers navigating infrastructure challenges. The app provides real-time port and yard congestion tracking (feeding your trucks), road vs rail route optimisation, supplier and order management, and analytics – all with a premium, data-rich UI.
 
 ## ✨ Features
 
-### Port Intelligence Dashboard
+### Port & Yard Intelligence (for Trucks)
 - **Real-time Port Monitoring**: Track congestion for Durban, Cape Town, Port Elizabeth, and Richards Bay
-- **Interactive Maps**: Visualize port locations with Leaflet maps
-- **Container Tracking**: Add, edit, and track multiple containers with full CRUD operations
+- **Interactive Maps**: Visualize key ports feeding your truck fleet with Leaflet maps
+- **Trucked Container Tracking**: Add, edit, and track multiple containers linked to your road legs
 - **Cost Calculator**: Estimate demurrage and storage fees based on port delays
 - **Congestion Analytics**: View 7-day trends and historical patterns
 
-### Freight Route Optimizer
-- **Multi-modal Comparison**: Compare road vs rail options side-by-side
-- **Cost Breakdown**: Detailed fuel, toll, and carbon footprint calculations
-- **Reliability Scoring**: See historical reliability data for each route
-- **Route Saving**: Save and manage your favorite routes
+### Truck Route Optimizer
+- **Multi-modal Comparison**: Compare road vs rail legs side-by-side for South African corridors
+- **Cost Breakdown**: Detailed fuel, toll, and carbon footprint calculations for road freight
+- **Reliability Scoring**: See reliability scores per mode
+- **Route Saving**: Save and manage your favourite routes
 
 ### Supplier & Inventory Manager
 - **Supplier Database**: Track suppliers with ratings and performance metrics
@@ -33,9 +33,13 @@ LogisticsLink is a comprehensive supply chain visibility platform designed speci
 - **Route Reliability**: Compare road vs rail reliability across routes
 - **Export Functionality**: Export data to CSV for external analysis
 
+### Licensing & Pricing
+- **Per-Company Licences**: 1-year, 2-year, and 5-year licence options priced for South African fleets
+- **Implementation Fee**: Once-off implementation / customisation fee for onboarding your company
+
 ## 🛠️ Technology Stack
 
-- **Frontend**: React 18+ with Hooks
+- **Frontend**: React 19+ with Hooks
 - **Styling**: Tailwind CSS 3.4
 - **Charts**: Recharts
 - **Maps**: Leaflet + React-Leaflet
@@ -167,12 +171,15 @@ npm run build
 npm run preview
 ```
 
-## 📋 Requirements & Compliance
+## 📋 Prototype Status
 
-- **Requirements Checklist**: See [REQUIREMENTS.md](./REQUIREMENTS.md)
-- **Compliance Report**: See [REQUIREMENTS_COMPLIANCE.md](./REQUIREMENTS_COMPLIANCE.md)
+This project is currently a **front-end prototype** focused on South African truck logistics:
 
-**Status**: ✅ 92% feature complete, 100% MVP requirements met, ready for production deployment.
+- ✅ All main views are implemented (Fleet Overview, Ports/Yards, Routes, Suppliers, Live Map, Pricing)
+- ✅ Data is persisted in the browser via `localStorage`
+- ✅ CSV export for containers, suppliers, orders, and routes
+- ⚠️ Live data (ports, routes, suppliers) is **simulated** – no production APIs yet
+- ⚠️ No authentication, user accounts, or licence enforcement have been implemented yet
 
 ## 📄 License
 

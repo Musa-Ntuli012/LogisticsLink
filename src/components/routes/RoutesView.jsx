@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Route as RouteIcon, Truck, Train, DollarSign, Clock, TrendingUp, AlertCircle, Save, Trash2, Download } from 'lucide-react'
-import { sampleRoutes, calculateRouteComparison, getReliabilityColor, getCongestionColor } from '../../utils/routeCalculator'
-import { loadRoutes, saveRoutes } from '../../utils/localStorage'
+import { calculateRouteComparison, getReliabilityColor, getCongestionColor } from '../../utils/routeCalculator'
 import { exportRoutes } from '../../utils/csvExport'
 import toast from 'react-hot-toast'
+import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/AuthContext.jsx'
 
 const MAJOR_CITIES = [
   'Johannesburg',
@@ -17,7 +18,9 @@ const MAJOR_CITIES = [
 ]
 
 function RoutesView() {
-  const [savedRoutes, setSavedRoutes] = useState(sampleRoutes)
+  const { company, role, licenceExpired } = useAuth()
+  const canWrite = !licenceExpired && role !== 'viewer'
+  const [savedRoutes, setSavedRoutes] = useState([])
   const [origin, setOrigin] = useState('')
   const [destination, setDestination] = useState('')
   const [cargoWeight, setCargoWeight] = useState('')
@@ -26,9 +29,36 @@ function RoutesView() {
   const [showCalculator, setShowCalculator] = useState(false)
 
   useEffect(() => {
-    const saved = loadRoutes(sampleRoutes)
-    setSavedRoutes(saved)
-  }, [])
+    if (!company?.id) return
+
+    async function load() {
+      const { data, error } = await supabase
+        .from('routes')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('Error loading routes from Supabase:', error)
+        toast.error('Failed to load routes')
+        setSavedRoutes([])
+        return
+      }
+
+      setSavedRoutes(
+        (data ?? []).map((r) => ({
+          routeId: r.route_id,
+          origin: r.origin,
+          destination: r.destination,
+          modes: r.modes || [],
+          id: r.id,
+        })),
+      )
+    }
+
+    load()
+  }, [company])
 
   const handleCalculate = () => {
     if (!origin || !destination) {
@@ -46,25 +76,60 @@ function RoutesView() {
     toast.success('Route calculated successfully')
   }
 
-  const handleSaveRoute = () => {
+  const handleSaveRoute = async () => {
     if (!calculatedRoute) return
-    const newRoute = {
-      ...calculatedRoute,
-      routeId: `ROUTE-${Date.now()}`,
+
+    try {
+      const newRoute = {
+        company_id: company?.id ?? null,
+        route_id: `ROUTE-${Date.now()}`,
+        origin: calculatedRoute.origin,
+        destination: calculatedRoute.destination,
+        modes: calculatedRoute.modes,
+      }
+
+      const { data, error } = await supabase
+        .from('routes')
+        .insert(newRoute)
+        .select()
+
+      if (error) throw error
+
+      const created = data?.[0]
+      setSavedRoutes((prev) => [
+        {
+          id: created.id,
+          routeId: created.route_id,
+          origin: created.origin,
+          destination: created.destination,
+          modes: created.modes || [],
+        },
+        ...prev,
+      ])
+      toast.success('Route saved successfully')
+      setCalculatedRoute(null)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error saving route:', error)
+      toast.error('Failed to save route')
     }
-    const updated = [...savedRoutes, newRoute]
-    setSavedRoutes(updated)
-    saveRoutes(updated)
-    toast.success('Route saved successfully')
-    setCalculatedRoute(null)
   }
 
-  const handleDeleteRoute = (routeId) => {
-    if (window.confirm('Are you sure you want to delete this route?')) {
-      const updated = savedRoutes.filter((r) => r.routeId !== routeId)
-      setSavedRoutes(updated)
-      saveRoutes(updated)
+  const handleDeleteRoute = async (route) => {
+    if (!window.confirm('Are you sure you want to delete this route?')) return
+
+    try {
+      if (route.id) {
+        const { error } = await supabase.from('routes').delete().eq('id', route.id)
+        if (error) throw error
+      }
+
+      setSavedRoutes((prev) => prev.filter((r) => r !== route))
       toast.success('Route deleted')
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error deleting route:', error)
+      toast.error('Failed to delete route')
     }
   }
 
@@ -74,7 +139,7 @@ function RoutesView() {
         <div>
           <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Freight Route Optimizer</h1>
           <p className="text-xs md:text-sm text-muted mt-1">
-            Compare road vs rail options with real-time cost and reliability data
+            Compare road vs rail legs for your loads with real-time cost and reliability assumptions
           </p>
         </div>
         <button
@@ -160,8 +225,9 @@ function RoutesView() {
             </h2>
             <div className="flex gap-2">
               <button
-                onClick={handleSaveRoute}
-                className="btn-primary flex items-center gap-2"
+                onClick={canWrite ? handleSaveRoute : undefined}
+                disabled={!canWrite}
+                className="btn-primary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <Save className="h-4 w-4" />
                 Save Route
@@ -190,7 +256,12 @@ function RoutesView() {
             <button
               onClick={() => {
                 try {
-                  exportRoutes(savedRoutes)
+                  exportRoutes(
+                    savedRoutes.map((r) => ({
+                      ...r,
+                      routeId: r.routeId,
+                    })),
+                  )
                   toast.success('Routes exported to CSV')
                 } catch (error) {
                   toast.error('Failed to export routes')
@@ -211,7 +282,7 @@ function RoutesView() {
         ) : (
           <div className="space-y-4">
             {savedRoutes.map((route) => (
-              <div key={route.routeId} className="glass-panel p-5">
+              <div key={route.id ?? route.routeId} className="glass-panel p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="text-base font-semibold">
@@ -222,8 +293,9 @@ function RoutesView() {
                   <div className="flex items-center gap-2">
                     <RouteIcon className="h-5 w-5 text-primary" />
                     <button
-                      onClick={() => handleDeleteRoute(route.routeId)}
-                      className="p-2 rounded-lg border border-danger/30 text-danger hover:bg-danger/10"
+                      onClick={canWrite ? () => handleDeleteRoute(route) : undefined}
+                      disabled={!canWrite}
+                      className="p-2 rounded-lg border border-danger/30 text-danger hover:bg-danger/10 disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>

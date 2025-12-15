@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
 import { Ship, AlertCircle, TrendingUp, TrendingDown, Minus, Cloud, Plus, Edit2, Trash2, X, Package, Map, Calculator, Download } from 'lucide-react'
-import { samplePorts, sampleContainers } from '../../utils/portSimulator'
-import { loadContainers, saveContainers } from '../../utils/localStorage'
+import { samplePorts } from '../../utils/portSimulator'
 import { exportContainers } from '../../utils/csvExport'
 import { format } from 'date-fns'
 import toast from 'react-hot-toast'
 import PortMap from './PortMap'
 import CostCalculator from './CostCalculator'
+import { supabase } from '../../lib/supabaseClient'
+import { useAuth } from '../../lib/AuthContext.jsx'
 
 function PortsView() {
+  const { company, role, licenceExpired } = useAuth()
+  const canWrite = !licenceExpired && role !== 'viewer'
   const [selectedPort, setSelectedPort] = useState(null)
   const [containers, setContainers] = useState([])
   const [showAddForm, setShowAddForm] = useState(false)
@@ -16,43 +19,101 @@ function PortsView() {
   const [showMap, setShowMap] = useState(false)
   const [showCostCalculator, setShowCostCalculator] = useState(false)
 
-  // Load containers from localStorage on mount
+  // Load containers from Supabase on mount (with fallback seeding from sample data)
   useEffect(() => {
-    const savedContainers = loadContainers(sampleContainers)
-    setContainers(savedContainers)
-  }, [])
+    if (!company?.id) return
 
-  const handleSaveContainer = (containerData) => {
-    let updatedContainers
-    if (editingContainer) {
-      // Update existing
-      updatedContainers = containers.map((c) =>
-        c.containerId === editingContainer.containerId ? { ...containerData, containerId: editingContainer.containerId } : c
-      )
-      toast.success('Container updated successfully')
-    } else {
-      // Add new
-      const newContainer = {
-        ...containerData,
-        containerId: containerData.containerId || `CONT-${Date.now()}`,
-        alerts: containerData.alerts || [],
-        milestones: containerData.milestones || [],
+    async function load() {
+      const { data, error } = await supabase
+        .from('containers')
+        .select('*')
+        .eq('company_id', company.id)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('Error loading containers from Supabase:', error)
+        toast.error('Failed to load containers')
+        setContainers([])
+        return
       }
-      updatedContainers = [...containers, newContainer]
-      toast.success('Container added successfully')
+
+      setContainers(data ?? [])
     }
-    setContainers(updatedContainers)
-    saveContainers(updatedContainers)
-    setShowAddForm(false)
-    setEditingContainer(null)
+
+    load()
+  }, [company])
+
+  const handleSaveContainer = async (containerData) => {
+    try {
+      if (editingContainer) {
+        const { data, error } = await supabase
+          .from('containers')
+          .update({
+            company_id: company?.id ?? editingContainer.company_id,
+            container_id: containerData.containerId,
+            shipment_name: containerData.shipmentName,
+            origin: containerData.origin,
+            destination: containerData.destination,
+            status: containerData.status,
+            current_location: containerData.currentLocation,
+            eta: containerData.eta,
+            confidence: containerData.confidence,
+          })
+          .eq('id', editingContainer.id)
+          .select()
+
+        if (error) throw error
+
+        const updated = data?.[0]
+        setContainers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+        toast.success('Container updated successfully')
+      } else {
+        const toInsert = {
+          company_id: company?.id ?? null,
+          container_id: containerData.containerId || `CONT-${Date.now()}`,
+          shipment_name: containerData.shipmentName,
+          origin: containerData.origin,
+          destination: containerData.destination,
+          status: containerData.status,
+          current_location: containerData.currentLocation,
+          eta: containerData.eta,
+          confidence: containerData.confidence,
+        }
+        const { data, error } = await supabase
+          .from('containers')
+          .insert(toInsert)
+          .select()
+
+        if (error) throw error
+
+        const created = data?.[0]
+        setContainers((prev) => [created, ...prev])
+        toast.success('Container added successfully')
+      }
+
+      setShowAddForm(false)
+      setEditingContainer(null)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error saving container:', error)
+      toast.error('Failed to save container')
+    }
   }
 
-  const handleDeleteContainer = (containerId) => {
-    if (window.confirm('Are you sure you want to delete this container?')) {
-      const updatedContainers = containers.filter((c) => c.containerId !== containerId)
-      setContainers(updatedContainers)
-      saveContainers(updatedContainers)
+  const handleDeleteContainer = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this container?')) return
+
+    try {
+      const { error } = await supabase.from('containers').delete().eq('id', id)
+      if (error) throw error
+
+      setContainers((prev) => prev.filter((c) => c.id !== id))
       toast.success('Container deleted')
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error deleting container:', error)
+      toast.error('Failed to delete container')
     }
   }
 
@@ -83,9 +144,9 @@ function PortsView() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Port Intelligence Dashboard</h1>
+          <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Port & Yard Intelligence</h1>
           <p className="text-xs md:text-sm text-muted mt-1">
-            Real-time congestion monitoring for South Africa's major ports
+            Real-time congestion monitoring for South Africa's major ports and yards feeding your road and rail network
           </p>
         </div>
         <div className="flex gap-2">
@@ -235,7 +296,7 @@ function PortsView() {
               <h3 className="text-sm font-semibold mb-2">Your Containers at This Port</h3>
               <div className="space-y-2">
                 {containers
-                  .filter((c) => c.currentLocation === selectedPort.portName)
+                  .filter((c) => (c.current_location ?? c.currentLocation) === selectedPort.portName)
                   .map((container) => (
                     <div
                       key={container.containerId}
@@ -243,14 +304,14 @@ function PortsView() {
                     >
                       <div className="flex items-center justify-between">
                         <div>
-                          <div className="text-sm font-medium">{container.containerId}</div>
-                          <div className="text-xs text-muted">{container.shipmentName}</div>
+                          <div className="text-sm font-medium">{container.container_id ?? container.containerId}</div>
+                          <div className="text-xs text-muted">{container.shipment_name ?? container.shipmentName}</div>
                         </div>
                         <div className="text-xs text-muted">ETA: {container.eta}</div>
                       </div>
                     </div>
                   ))}
-                {containers.filter((c) => c.currentLocation === selectedPort.portName)
+                {containers.filter((c) => (c.current_location ?? c.currentLocation) === selectedPort.portName)
                   .length === 0 && (
                   <div className="text-sm text-muted text-center py-4">
                     No containers currently at this port
@@ -271,7 +332,19 @@ function PortsView() {
               <button
                 onClick={() => {
                   try {
-                    exportContainers(containers)
+                    // Normalise data for CSV export so it works with both Supabase (snake_case)
+                    // and legacy local data (camelCase).
+                    const exportData = containers.map((c) => ({
+                      containerId: c.container_id ?? c.containerId,
+                      shipmentName: c.shipment_name ?? c.shipmentName,
+                      origin: c.origin,
+                      destination: c.destination,
+                      status: c.status,
+                      currentLocation: c.current_location ?? c.currentLocation,
+                      eta: c.eta,
+                      confidence: c.confidence,
+                    }))
+                    exportContainers(exportData)
                     toast.success('Containers exported to CSV')
                   } catch (error) {
                     toast.error('Failed to export containers')
@@ -285,10 +358,12 @@ function PortsView() {
             )}
             <button
               onClick={() => {
+                if (!canWrite) return
                 setEditingContainer(null)
                 setShowAddForm(true)
               }}
-              className="btn-primary flex items-center gap-2"
+              disabled={!canWrite}
+              className="btn-primary flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Plus className="h-4 w-4" />
               Add Container
@@ -304,13 +379,13 @@ function PortsView() {
           ) : (
             containers.map((container) => (
             <div
-              key={container.containerId}
+              key={container.id ?? container.containerId}
               className="p-4 rounded-lg bg-slate-900/50 border border-slate-800"
             >
               <div className="flex items-start justify-between mb-2">
                 <div>
-                  <div className="text-sm font-semibold">{container.containerId}</div>
-                  <div className="text-xs text-muted mt-1">{container.shipmentName}</div>
+                  <div className="text-sm font-semibold">{container.container_id ?? container.containerId}</div>
+                  <div className="text-xs text-muted mt-1">{container.shipment_name ?? container.shipmentName}</div>
                 </div>
                 <div className={`badge ${
                   container.status === 'in_port' ? 'bg-warning/10 border-warning/30 text-warning' :
@@ -331,7 +406,7 @@ function PortsView() {
                 </div>
                 <div>
                   <span className="text-muted">Current:</span>
-                  <div className="font-medium">{container.currentLocation}</div>
+                  <div className="font-medium">{container.current_location ?? container.currentLocation}</div>
                 </div>
                 <div>
                   <span className="text-muted">ETA:</span>
@@ -340,7 +415,7 @@ function PortsView() {
               </div>
               {container.alerts && container.alerts.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-slate-800">
-                  {container.alerts.map((alert, idx) => (
+                  {(container.alerts || []).map((alert, idx) => (
                     <div key={idx} className="flex items-start gap-2 text-xs text-warning">
                       <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
                       <span>{alert.message}</span>
@@ -350,15 +425,17 @@ function PortsView() {
               )}
               <div className="mt-3 pt-3 border-t border-slate-800 flex gap-2">
                 <button
-                  onClick={() => handleEditContainer(container)}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 flex items-center gap-1"
+                  onClick={() => canWrite && handleEditContainer(container)}
+                  disabled={!canWrite}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <Edit2 className="h-3 w-3" />
                   Edit
                 </button>
                 <button
-                  onClick={() => handleDeleteContainer(container.containerId)}
-                  className="text-xs px-3 py-1.5 rounded-lg border border-danger/30 text-danger hover:bg-danger/10 flex items-center gap-1"
+                  onClick={() => canWrite && handleDeleteContainer(container.id ?? container.containerId)}
+                  disabled={!canWrite}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-danger/30 text-danger hover:bg-danger/10 flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="h-3 w-3" />
                   Delete
